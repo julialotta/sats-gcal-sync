@@ -1,0 +1,6 @@
+{
+  "sats_email": "your@email.com",
+  "sats_password": "your_sats_password",
+  "google_calendar_id": "primary",
+  "sync_interval_minutes": 60
+}
