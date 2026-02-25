@@ -166,7 +166,7 @@ def _parse_datetime(raw_date: str, raw_time: str) -> datetime:
     """
     # Swedish abbreviated month names → month number
     SV_MONTHS = {
-        "jan": 1, "feb": 2, "mar": 3, "apr": 4,
+        "jan": 1, "feb": 2, "mar": 3, "mars": 3, "apr": 4,
         "maj": 5, "jun": 6, "jul": 7, "aug": 8,
         "sep": 9, "okt": 10, "nov": 11, "dec": 12,
     }

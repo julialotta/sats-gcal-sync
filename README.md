@@ -2,68 +2,76 @@
 
 Automatically syncs your booked Sats workout classes to Google Calendar.
 
-## Quick start
+## Setup
 
-### 1. Install dependencies
+### 1. Clone and install dependencies
 
 ```bash
+git clone https://github.com/YOUR_USERNAME/sats-gcal-sync.git
 cd sats-gcal-sync
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 playwright install chromium
 ```
 
-### 2. Set up Google Calendar API (one-time)
+### 2. Create a secret key
+
+```bash
+cp .env.example .env
+python -c "import secrets; print(secrets.token_hex(32))"
+# Paste the output into .env as SECRET_KEY
+```
+
+### 3. Get Google OAuth credentials (one-time)
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/) → create a new project
 2. Enable the **Google Calendar API** (APIs & Services → Library)
 3. Go to APIs & Services → Credentials → **Create Credentials → OAuth 2.0 Client ID**
    - Application type: **Web application**
-   - Authorized redirect URIs: `http://localhost:5000/oauth/callback`
-4. Download the JSON file and save it as **`credentials.json`** in this directory
+   - Authorized redirect URIs: `http://localhost:5001/oauth/callback`
+4. Copy the **Client ID** and **Client Secret** — you'll paste them into the app
 
-### 3. Run the app
+### 4. Run the app
 
 ```bash
 python app.py
 ```
 
-Open **http://localhost:5000** in your browser.
+Open **http://localhost:5001** in your browser.
 
-### 4. Connect everything
+### 5. Connect everything (first run)
 
-1. Click **Settings** → enter your Sats email and password → Save
-2. Click **Connect with Google** → authorize in your browser
-3. Click **Sync Now** to run the first sync
+1. **Google Calendar**: paste your Client ID and Client Secret into the form → click **Save & Continue** → authorize in the Google popup
+2. **Settings**: enter your Sats email and password → Save
+3. **Sync Now** to run the first sync
 
 The app will then automatically sync every hour in the background.
 
-## Updating scraper selectors
-
-`min.sats.se` is a JavaScript SPA. If the sync finds no bookings, the CSS selectors
-in [scraper.py](scraper.py) (the `SELECTORS` dict at the top) may need updating:
-
-1. Log in to https://min.sats.se/kommande-traning in Chrome
-2. Right-click a booking card → **Inspect**
-3. Find the CSS classes/IDs for: booking card, title, time, date, location, instructor
-4. Update the `SELECTORS` dict in `scraper.py` accordingly
-
-## Files
+## Files committed to git
 
 | File | Purpose |
 |------|---------|
-| `app.py` | Flask web app, routes, sync logic |
+| `app.py` | Flask web app |
 | `scraper.py` | Playwright-based Sats scraper |
 | `gcal.py` | Google Calendar API wrapper |
 | `config.py` | Config loading/saving |
-| `scheduler.py` | APScheduler background sync |
-| `credentials.json` | Google OAuth credentials (**gitignored**) |
-| `token.json` | Google access/refresh tokens (**gitignored**) |
-| `config.json` | Sats credentials & settings (**gitignored**) |
-| `browser_state.json` | Saved Playwright session (**gitignored**) |
+| `scheduler.py` | Background sync scheduler |
+| `.env.example` | Template for `SECRET_KEY` |
+| `credentials.json.example` | Template for Google OAuth credentials |
+| `config.json.example` | Template for Sats credentials |
+
+## Files that are gitignored (created locally)
+
+| File | Contains |
+|------|---------|
+| `.env` | Your `SECRET_KEY` |
+| `credentials.json` | Your Google OAuth client ID + secret |
+| `token.json` | Your Google access/refresh tokens |
+| `config.json` | Your Sats email + password |
+| `browser_state.json` | Saved Playwright browser session |
 
 ## Notes
 
 - This app is for **personal use only**. Scraping Sats may violate their Terms of Service.
-- Your Sats password is stored locally in `config.json` and never sent anywhere except to `min.sats.se`.
-- If Sats adds CAPTCHA or changes their login flow, the scraper may stop working.
+- Your Sats password is stored locally in `config.json` and only ever sent to `min.sats.se`.
+- If Sats changes their login flow or page structure, the scraper selectors in `scraper.py` may need updating.

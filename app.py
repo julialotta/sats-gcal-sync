@@ -46,6 +46,7 @@ app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 # Sync state (in-memory — resets on restart)
 sync_log: list[dict] = []
 last_sync_result: dict = {}
+last_bookings: list[dict] = []
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +79,9 @@ def run_sync() -> dict:
         logger.info("Starting sync...")
         bookings = scraper.scrape_bookings(conf["sats_email"], conf["sats_password"])
         result["bookings_found"] = len(bookings)
+
+        global last_bookings
+        last_bookings = bookings
 
         summary = gcal.sync_bookings(bookings, conf["google_calendar_id"])
         result.update(summary)
@@ -115,9 +119,11 @@ def index():
         "index.html",
         config=conf,
         gcal_connected=gcal.is_connected(),
+        gcal_credentials_set=gcal.CREDENTIALS_FILE.exists(),
         sats_configured=cfg.is_sats_configured(),
         last_sync=last_sync_result,
         sync_log=sync_log[:20],
+        bookings=last_bookings,
     )
 
 
@@ -144,24 +150,56 @@ def sync_now():
 
 @app.route("/status")
 def status():
-    return jsonify(last_sync_result)
+    data = dict(last_sync_result)
+    data["bookings"] = [
+        {"title": b["title"], "start_dt": b["start_dt"].strftime("%-d %b %H:%M")}
+        for b in last_bookings
+    ]
+    return jsonify(data)
 
 
 # ---------------------------------------------------------------------------
 # Google OAuth routes
 # ---------------------------------------------------------------------------
 
+@app.route("/google-credentials", methods=["POST"])
+def save_google_credentials():
+    """Accept Google OAuth client ID + secret from the setup form and write credentials.json."""
+    client_id = request.form.get("client_id", "").strip()
+    client_secret = request.form.get("client_secret", "").strip()
+
+    if not client_id or not client_secret:
+        flash("Both Client ID and Client Secret are required.", "danger")
+        return redirect(url_for("index"))
+
+    creds_data = {
+        "web": {
+            "client_id": client_id,
+            "project_id": "sats-gcal-sync",
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_secret": client_secret,
+            "redirect_uris": [request.host_url.rstrip("/") + "/oauth/callback"],
+        }
+    }
+
+    import json
+    gcal.CREDENTIALS_FILE.write_text(json.dumps(creds_data, indent=2))
+    flash("Google credentials saved. Now click 'Connect with Google'.", "success")
+    return redirect(url_for("index"))
+
+
 @app.route("/setup")
 def setup():
     if not gcal.CREDENTIALS_FILE.exists():
         flash(
-            "credentials.json not found. Download it from Google Cloud Console "
-            "and place it in the project directory.",
+            "Enter your Google OAuth Client ID and Secret below first.",
             "danger",
         )
         return redirect(url_for("index"))
 
-    redirect_uri = "http://localhost:5001/oauth/callback"
+    redirect_uri = request.host_url.rstrip("/") + "/oauth/callback"
     auth_url, state = gcal.get_auth_url(redirect_uri)
     session["oauth_state"] = state
     return redirect(auth_url)
@@ -175,7 +213,7 @@ def oauth_callback():
         return redirect(url_for("index"))
 
     try:
-        redirect_uri = "http://localhost:5001/oauth/callback"
+        redirect_uri = request.host_url.rstrip("/") + "/oauth/callback"
         gcal.exchange_code_for_token(code, redirect_uri)
         flash("Google Calendar connected successfully!", "success")
     except Exception as exc:
