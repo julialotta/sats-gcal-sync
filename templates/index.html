@@ -506,10 +506,18 @@
         .catch(function() {});
     }, 2000);
 
-    window.addEventListener('beforeunload', function() { clearInterval(interval); });
+    window.addEventListener('beforeunload', function() {
+      clearInterval(interval);
+      clearTimeout(timeoutWarning);
+    });
+
+    // If sync takes >60s, show a warning
+    var timeoutWarning = setTimeout(function() {
+      subtext.textContent = 'Taking longer than expected — still running…';
+    }, 60000);
   });
 
-  {% if bookings %}
+  {% if just_synced and bookings %}
   document.getElementById('bookings-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
   {% endif %}
 </script>

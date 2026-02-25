@@ -9,7 +9,8 @@ SELECTORS dict below to match the actual DOM structure.
 
 import hashlib
 import logging
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -203,9 +204,6 @@ def _parse_datetime(raw_date: str, raw_time: str) -> datetime:
 
 def _parse_end_time(start_dt: datetime, duration_text: str) -> datetime:
     """Derive end time from duration string like '45 min' or '1 tim'."""
-    import re
-    from datetime import timedelta
-
     minutes = 60  # default fallback
 
     match = re.search(r"(\d+)\s*min", duration_text, re.IGNORECASE)
@@ -226,31 +224,45 @@ def scrape_bookings(email: str, password: str) -> list[dict]:
     """
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-
-        # Reuse saved session if it exists
-        context_kwargs = {}
-        if BROWSER_STATE_FILE.exists():
-            logger.debug("Loading saved browser session from %s", BROWSER_STATE_FILE)
-            context_kwargs["storage_state"] = str(BROWSER_STATE_FILE)
-
-        context = browser.new_context(**context_kwargs)
-        page = context.new_page()
-
-        # Check if we're already logged in by visiting the bookings page
-        page.goto(SATS_BOOKINGS_URL, wait_until="networkidle")
-        if "/logga-in" in page.url or "/login" in page.url or "auth." in page.url or "openid-connect" in page.url:
-            logger.info("Session expired or not found — logging in...")
-            if not _login(page, email, password):
-                browser.close()
-                raise RuntimeError(
-                    "Sats login failed. Check your email/password in the settings."
-                )
-            _save_storage(context)
-            # Navigate back to bookings after login
-            page.goto(SATS_BOOKINGS_URL, wait_until="networkidle")
-
-        bookings = _parse_bookings(page)
-        _save_storage(context)
+        try:
+            bookings = _scrape_with_browser(browser, email, password)
+        except Exception:
+            browser.close()
+            raise
         browser.close()
 
+    return bookings
+
+
+def _scrape_with_browser(browser, email: str, password: str) -> list[dict]:
+    """Run the scrape using an already-launched browser instance."""
+    # Reuse saved session if it exists and is valid JSON
+    context_kwargs = {}
+    if BROWSER_STATE_FILE.exists():
+        try:
+            import json
+            json.loads(BROWSER_STATE_FILE.read_text())
+            logger.debug("Loading saved browser session from %s", BROWSER_STATE_FILE)
+            context_kwargs["storage_state"] = str(BROWSER_STATE_FILE)
+        except (json.JSONDecodeError, OSError):
+            logger.warning("Browser state file is corrupt — deleting and logging in fresh")
+            BROWSER_STATE_FILE.unlink(missing_ok=True)
+
+    context = browser.new_context(**context_kwargs)
+    page = context.new_page()
+
+    # Check if we're already logged in by visiting the bookings page
+    page.goto(SATS_BOOKINGS_URL, wait_until="networkidle")
+    if "/logga-in" in page.url or "/login" in page.url or "auth." in page.url or "openid-connect" in page.url:
+        logger.info("Session expired or not found — logging in...")
+        if not _login(page, email, password):
+            raise RuntimeError(
+                "Sats login failed. Check your email/password in the settings."
+            )
+        _save_storage(context)
+        # Navigate back to bookings after login
+        page.goto(SATS_BOOKINGS_URL, wait_until="networkidle")
+
+    bookings = _parse_bookings(page)
+    _save_storage(context)
     return bookings

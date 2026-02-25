@@ -4,12 +4,14 @@ Sats → Google Calendar Sync — Flask web app
 Run with:
     python app.py
 
-Then open http://localhost:5000 in your browser.
+Then open http://localhost:5001 in your browser.
 """
 
+import json
 import logging
 import os
 import secrets
+import threading
 from datetime import datetime
 
 from flask import (
@@ -47,6 +49,7 @@ app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 sync_log: list[dict] = []
 last_sync_result: dict = {}
 last_bookings: list[dict] = []
+_sync_lock = threading.Lock()  # prevents concurrent syncs
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +57,23 @@ last_bookings: list[dict] = []
 # ---------------------------------------------------------------------------
 def run_sync() -> dict:
     """Run a full Sats → GCal sync cycle. Returns result summary."""
+    if not _sync_lock.acquire(blocking=False):
+        logger.info("Sync already in progress — skipping")
+        return {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "status": "error",
+            "message": "Sync already in progress.",
+            "created": 0, "updated": 0, "deleted": 0, "bookings_found": 0,
+        }
+
+    try:
+        return _do_sync()
+    finally:
+        _sync_lock.release()
+
+
+def _do_sync() -> dict:
+    """Inner sync logic — called only when lock is held."""
     conf = cfg.load()
     result = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -100,7 +120,7 @@ def run_sync() -> dict:
     return result
 
 
-def _log(result: dict) -> None:
+def _log(result: dict) -> None:  # noqa: E302
     global last_sync_result
     last_sync_result = result
     sync_log.insert(0, result)
@@ -124,6 +144,7 @@ def index():
         last_sync=last_sync_result,
         sync_log=sync_log[:20],
         bookings=last_bookings,
+        just_synced=request.args.get("synced") == "1",
     )
 
 
@@ -145,7 +166,7 @@ def sync_now():
     if request.headers.get("Accept") == "application/json":
         return jsonify(result)
     flash(result["message"], "success" if result["status"] == "ok" else "danger")
-    return redirect(url_for("index"))
+    return redirect(url_for("index", synced="1"))
 
 
 @app.route("/status")
@@ -184,7 +205,6 @@ def save_google_credentials():
         }
     }
 
-    import json
     gcal.CREDENTIALS_FILE.write_text(json.dumps(creds_data, indent=2))
     flash("Google credentials saved. Now click 'Connect with Google'.", "success")
     return redirect(url_for("index"))
