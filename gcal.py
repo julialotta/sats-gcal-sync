@@ -82,10 +82,24 @@ def get_service():
 
     if creds.expired and creds.refresh_token:
         logger.debug("Refreshing expired Google token...")
-        creds.refresh(Request())
-        TOKEN_FILE.write_text(creds.to_json())
+        try:
+            creds.refresh(Request())
+            TOKEN_FILE.write_text(creds.to_json())
+        except Exception as exc:
+            if "invalid_grant" in str(exc).lower():
+                logger.warning("Google token revoked or expired — deleting token.json")
+                TOKEN_FILE.unlink(missing_ok=True)
+                raise TokenRevokedError(
+                    "Google authorization has expired or been revoked. "
+                    "Please re-authorize."
+                ) from exc
+            raise
 
     return build("calendar", "v3", credentials=creds)
+
+
+class TokenRevokedError(RuntimeError):
+    """Raised when the Google OAuth token is revoked or permanently expired."""
 
 
 def is_connected() -> bool:

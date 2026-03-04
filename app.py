@@ -112,6 +112,10 @@ def _do_sync() -> dict:
             f"{summary['deleted']} deleted."
         )
         logger.info(result["message"])
+    except gcal.TokenRevokedError as exc:
+        result["message"] = str(exc)
+        result["reauth_required"] = True
+        logger.warning("Token revoked — user needs to re-authorize")
     except Exception as exc:
         result["message"] = str(exc)
         logger.exception("Sync failed: %s", exc)
@@ -145,6 +149,7 @@ def index():
         sync_log=sync_log[:20],
         bookings=last_bookings,
         just_synced=request.args.get("synced") == "1",
+        reauth_required=request.args.get("reauth") == "1",
     )
 
 
@@ -165,6 +170,9 @@ def sync_now():
     result = run_sync()
     if request.headers.get("Accept") == "application/json":
         return jsonify(result)
+    if result.get("reauth_required"):
+        flash(result["message"], "danger")
+        return redirect(url_for("index", reauth="1"))
     flash(result["message"], "success" if result["status"] == "ok" else "danger")
     return redirect(url_for("index", synced="1"))
 
